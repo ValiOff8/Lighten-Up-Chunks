@@ -2,7 +2,6 @@ package io.github.dean.lightenupchunks.client;
 
 import io.github.dean.lightenupchunks.LucConfig;
 import io.github.dean.lightenupchunks.LucConfigManager;
-import io.github.dean.lightenupchunks.TextComponents;
 import io.github.dean.lightenupchunks.task.RelightMode;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -26,7 +25,7 @@ public final class LucConfigScreen extends Screen {
 	private final Screen parent;
 
 	public LucConfigScreen(Screen parent) {
-		super(TextComponents.literal("Lighten Up, Chunks! Config"));
+		super(Component.literal("Lighten Up, Chunks! Config"));
 		this.parent = parent;
 	}
 
@@ -46,7 +45,7 @@ public final class LucConfigScreen extends Screen {
 	@Override
 	public void onClose() {
 		if (this.minecraft != null) {
-			this.minecraft.setScreen(parent);
+			this.minecraft.gui.setScreen(parent);
 		}
 	}
 
@@ -54,7 +53,7 @@ public final class LucConfigScreen extends Screen {
 		clearWidgets();
 
 		addCenteredLabel(this.title, 20);
-		addCenteredLabel(TextComponents.literal(LucConfigManager.path().toString()), 34);
+		addCenteredLabel(Component.literal(LucConfigManager.path().toString()), 34);
 
 		LucConfig config = LucConfigManager.get();
 		List<SettingEntry> entries = new ArrayList<>();
@@ -91,31 +90,31 @@ public final class LucConfigScreen extends Screen {
 		int gap = 8;
 		int totalWidth = smallWidth * 3 + gap * 2;
 		int footerLeft = (this.width - totalWidth) / 2;
-		addRenderableWidget(Button.builder(TextComponents.literal("Reload"), button -> {
+		addRenderableWidget(Button.builder(Component.literal("Reload"), button -> {
 			LucConfigManager.reload();
 			rebuildWidgets();
 		}).bounds(footerLeft, footerY, smallWidth, BUTTON_HEIGHT).build());
-		addRenderableWidget(Button.builder(TextComponents.literal("Reset"), button -> {
+		addRenderableWidget(Button.builder(Component.literal("Reset"), button -> {
 			try {
 				LucConfigManager.reset();
 			} catch (IOException ignored) {
 			}
 			rebuildWidgets();
 		}).bounds(footerLeft + smallWidth + gap, footerY, smallWidth, BUTTON_HEIGHT).build());
-		addRenderableWidget(Button.builder(TextComponents.literal("Done"), button -> onClose())
+		addRenderableWidget(Button.builder(Component.literal("Done"), button -> onClose())
 			.bounds(footerLeft + (smallWidth + gap) * 2, footerY, smallWidth, BUTTON_HEIGHT)
 			.build());
 	}
 
 	private static SettingEntry toggle(String label, Supplier<Boolean> getter, Consumer<Boolean> setter) {
 		return new SettingEntry(
-			() -> TextComponents.literal(label + ": " + (getter.get() ? "ON" : "OFF")),
+			() -> Component.literal(label + ": " + (getter.get() ? "ON" : "OFF")),
 			() -> setter.accept(!getter.get())
 		);
 	}
 
 	private static SettingEntry cycle(String label, Supplier<String> valueSupplier, Runnable action) {
-		return new SettingEntry(() -> TextComponents.literal(label + ": " + valueSupplier.get()), action);
+		return new SettingEntry(() -> Component.literal(label + ": " + valueSupplier.get()), action);
 	}
 
 	private void addCenteredLabel(Component message, int y) {

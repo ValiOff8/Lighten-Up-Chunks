@@ -7,8 +7,6 @@ import io.github.dean.lightenupchunks.LucConfig;
 import io.github.dean.lightenupchunks.LucConfigManager;
 import io.github.dean.lightenupchunks.LucDimensions;
 import io.github.dean.lightenupchunks.LightenUpChunks;
-import io.github.dean.lightenupchunks.ServerLevels;
-import io.github.dean.lightenupchunks.TextComponents;
 import io.github.dean.lightenupchunks.WorldPathResolver;
 import io.github.dean.lightenupchunks.scanner.BoxScanner;
 import io.github.dean.lightenupchunks.scanner.ChunkRegionScanner;
@@ -27,11 +25,9 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.WeakHashMap;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
@@ -60,9 +56,8 @@ public final class LucTaskManager {
 	private long lastChunkSaveFlushAtMillis;
 	private boolean pendingChunkSaveFlush;
 	private String configuredDimension = LucDimensions.OVERWORLD;
-	private ConfiguredScan configuredScan = ConfiguredScan.world();
+	private ConfiguredScan configuredScan = ConfiguredScan.square(0, 0, 500, 500);
 	private RelightMode configuredRelightMode = configuredDefaultRelightMode();
-	private boolean hasConfiguredSelection;
 
 	private LucTaskManager(MinecraftServer server) {
 		this.server = server;
@@ -95,55 +90,11 @@ public final class LucTaskManager {
 	}
 
 	public int startConfigured(CommandSourceStack source) throws CommandSyntaxException {
-		TaskSelection selection = defaultSelection(source);
-		return startTask(source, selection.dimension(), selection.scan(), configuredRelightMode);
-	}
-
-	public int startWorld(CommandSourceStack source, String dimension) throws CommandSyntaxException {
-		configuredDimension = dimension;
-		configuredScan = ConfiguredScan.world();
-		hasConfiguredSelection = true;
-		return startTask(source, dimension, configuredScan, configuredRelightMode);
-	}
-
-	public int startRadius(CommandSourceStack source, String dimension, int radius, int centerX, int centerZ) throws CommandSyntaxException {
-		configuredDimension = dimension;
-		configuredScan = ConfiguredScan.radius(radius, centerX, centerZ);
-		hasConfiguredSelection = true;
-		return startTask(source, dimension, configuredScan, configuredRelightMode);
-	}
-
-	public int startRegion(CommandSourceStack source, String dimension, int x1, int z1, int x2, int z2) throws CommandSyntaxException {
-		configuredDimension = dimension;
-		configuredScan = ConfiguredScan.box(x1, z1, x2, z2);
-		hasConfiguredSelection = true;
-		return startTask(source, dimension, configuredScan, configuredRelightMode);
+		return startTask(source, configuredDimension, configuredScan, configuredRelightMode);
 	}
 
 	public int previewConfigured(CommandSourceStack source) throws CommandSyntaxException {
-		TaskSelection selection = defaultSelection(source);
-		return previewTask(source, selection.dimension(), selection.scan(), configuredRelightMode);
-	}
-
-	public int previewWorld(CommandSourceStack source, String dimension) throws CommandSyntaxException {
-		configuredDimension = dimension;
-		configuredScan = ConfiguredScan.world();
-		hasConfiguredSelection = true;
-		return previewTask(source, dimension, configuredScan, configuredRelightMode);
-	}
-
-	public int previewRadius(CommandSourceStack source, String dimension, int radius, int centerX, int centerZ) throws CommandSyntaxException {
-		configuredDimension = dimension;
-		configuredScan = ConfiguredScan.radius(radius, centerX, centerZ);
-		hasConfiguredSelection = true;
-		return previewTask(source, dimension, configuredScan, configuredRelightMode);
-	}
-
-	public int previewRegion(CommandSourceStack source, String dimension, int x1, int z1, int x2, int z2) throws CommandSyntaxException {
-		configuredDimension = dimension;
-		configuredScan = ConfiguredScan.box(x1, z1, x2, z2);
-		hasConfiguredSelection = true;
-		return previewTask(source, dimension, configuredScan, configuredRelightMode);
+		return previewTask(source, configuredDimension, configuredScan, configuredRelightMode);
 	}
 
 	public int pause(CommandSourceStack source) throws CommandSyntaxException {
@@ -252,23 +203,6 @@ public final class LucTaskManager {
 		return 1;
 	}
 
-	public int dimensions(CommandSourceStack source) {
-		CommandFeedback.sendSuccess(source, "LUC dimensions | " + String.join(", ", availableDimensions()), false);
-		return 1;
-	}
-
-	public int resetSelection(CommandSourceStack source) {
-		configuredDimension = LucDimensions.asString(source.getLevel());
-		configuredScan = ConfiguredScan.world();
-		hasConfiguredSelection = false;
-		CommandFeedback.sendSuccess(
-			source,
-			"Reset selection. /luc start will scan the whole current world/dimension (" + configuredDimension + ") with relight=" + configuredRelightMode.serializedName() + ".",
-			false
-		);
-		return 1;
-	}
-
 	public int selection(CommandSourceStack source) {
 		CommandFeedback.sendSuccess(source, describeSelection(), false);
 		return 1;
@@ -293,49 +227,36 @@ public final class LucTaskManager {
 	public int configureWorld(CommandSourceStack source, String dimension) throws CommandSyntaxException {
 		requireLevel(dimension);
 		configuredDimension = dimension;
-		configuredScan = ConfiguredScan.world();
-		hasConfiguredSelection = true;
-		CommandFeedback.sendSuccess(
-			source,
-			"Configured world scan for " + dimension + " with relight=" + configuredRelightMode.serializedName() + ".",
-			false
-		);
+		CommandFeedback.sendSuccess(source, "Selected world/dimension: " + dimension + ".", false);
 		return 1;
 	}
 
-	public int configureRadius(CommandSourceStack source, int radius, int centerX, int centerZ) {
-		configuredDimension = LucDimensions.asString(source.getLevel());
-		configuredScan = ConfiguredScan.radius(radius, centerX, centerZ);
-		hasConfiguredSelection = true;
-		CommandFeedback.sendSuccess(
-			source,
-			"Configured radius scan in " + configuredDimension + ": r=" + radius + " blocks at (" + centerX + ", " + centerZ + ") with relight=" + configuredRelightMode.serializedName() + ".",
-			false
-		);
+	public int configureShape(CommandSourceStack source, String shape) {
+		configuredScan = configuredScan.withShape(shape);
+		CommandFeedback.sendSuccess(source, "Selected shape: " + configuredScan.shapeName() + ".", false);
 		return 1;
 	}
 
-	public int configureRegion(CommandSourceStack source, int x1, int z1, int x2, int z2) {
-		configuredDimension = LucDimensions.asString(source.getLevel());
+	public int configureCenter(CommandSourceStack source, int centerX, int centerZ) {
+		configuredScan = configuredScan.withCenter(centerX, centerZ);
+		CommandFeedback.sendSuccess(source, "Selected center: " + centerX + ", " + centerZ + ".", false);
+		return 1;
+	}
+
+	public int configureRadius(CommandSourceStack source, int radiusX, int radiusZ) {
+		configuredScan = configuredScan.withRadius(radiusX, radiusZ);
+		CommandFeedback.sendSuccess(source, "Selected radius: " + radiusX + " x " + radiusZ + " blocks.", false);
+		return 1;
+	}
+
+	public int configureCorners(CommandSourceStack source, int x1, int z1, int x2, int z2) {
 		configuredScan = ConfiguredScan.box(x1, z1, x2, z2);
-		hasConfiguredSelection = true;
 		CommandFeedback.sendSuccess(
 			source,
-			"Configured region scan in " + configuredDimension + " from block (" + x1 + ", " + z1 + ") to (" + x2 + ", " + z2 + ") with relight=" + configuredRelightMode.serializedName() + ".",
+			"Selected corners: " + x1 + ", " + z1 + " to " + x2 + ", " + z2 + ".",
 			false
 		);
 		return 1;
-	}
-
-	private TaskSelection defaultSelection(CommandSourceStack source) {
-		if (hasConfiguredSelection) {
-			return new TaskSelection(configuredDimension, configuredScan);
-		}
-
-		String currentDimension = LucDimensions.asString(source.getLevel());
-		configuredDimension = currentDimension;
-		configuredScan = ConfiguredScan.world();
-		return new TaskSelection(currentDimension, configuredScan);
 	}
 
 	private int previewTask(CommandSourceStack source, String dimension, ConfiguredScan scan, RelightMode relightMode) throws CommandSyntaxException {
@@ -502,7 +423,7 @@ public final class LucTaskManager {
 
 	private ServerLevel findLevel(String dimension) {
 		String normalized = LucDimensions.normalize(dimension);
-		for (ServerLevel level : ServerLevels.all(server)) {
+		for (ServerLevel level : server.getAllLevels()) {
 			if (LucDimensions.asString(level).equals(normalized)) {
 				return level;
 			}
@@ -562,8 +483,7 @@ public final class LucTaskManager {
 	}
 
 	private String describeSelection() {
-		return "LUC selection" + (hasConfiguredSelection ? "" : " (default: /luc start scans the whole current world)") +
-			" | dim=" + configuredDimension +
+		return "LUC selection | dim=" + configuredDimension +
 			" | mode=" + configuredScan.describe() +
 			" | relight=" + configuredRelightMode.serializedName();
 	}
@@ -657,7 +577,7 @@ public final class LucTaskManager {
 	}
 
 	private static CommandSyntaxException commandError(String message) {
-		return new SimpleCommandExceptionType(TextComponents.literal(message)).create();
+		return new SimpleCommandExceptionType(Component.literal(message)).create();
 	}
 
 	public void onPlayerJoin(ServerPlayer player) {
@@ -765,17 +685,6 @@ public final class LucTaskManager {
 		return new TaskPlan(dimension, scan, relightMode, matchedChunks.size(), List.copyOf(runnableChunks), boundarySkipped);
 	}
 
-	private List<String> availableDimensions() {
-		Set<String> dimensions = new LinkedHashSet<>();
-		dimensions.add(LucDimensions.OVERWORLD);
-		dimensions.add(LucDimensions.NETHER);
-		dimensions.add(LucDimensions.END);
-		for (ServerLevel level : ServerLevels.all(server)) {
-			dimensions.add(LucDimensions.asString(level));
-		}
-		return List.copyOf(dimensions);
-	}
-
 	private String describeThroughputSettings() {
 		LucConfig config = LucConfigManager.get();
 		return "throughput maxInFlight=" + describeOverride(config.maxInFlightChunks, currentMaxInFlight()) +
@@ -825,7 +734,7 @@ public final class LucTaskManager {
 			builder.append(" | skipped ").append(formatCount(task.getSkippedChunks()))
 				.append(" | failed ").append(formatCount(task.getFailedChunks()));
 		}
-		Component message = TextComponents.literal(builder.toString());
+		Component message = Component.literal(builder.toString());
 		for (ServerPlayer player : server.getPlayerList().getPlayers()) {
 			player.sendSystemMessage(message);
 		}
@@ -945,7 +854,9 @@ public final class LucTaskManager {
 		}
 	}
 
-	private record ConfiguredScan(ScanKind kind, int a, int b, int c, int d) {
+	static record ConfiguredScan(ScanKind kind, int a, int b, int c, int d) {
+		private static final int DEFAULT_RADIUS = 500;
+
 		static ConfiguredScan world() {
 			return new ConfiguredScan(ScanKind.WORLD, 0, 0, 0, 0);
 		}
@@ -958,11 +869,89 @@ public final class LucTaskManager {
 			return new ConfiguredScan(ScanKind.BOX, x1, z1, x2, z2);
 		}
 
+		static ConfiguredScan square(int centerX, int centerZ, int radiusX, int radiusZ) {
+			return box(
+				clampToInt((long) centerX - radiusX),
+				clampToInt((long) centerZ - radiusZ),
+				clampToInt((long) centerX + radiusX),
+				clampToInt((long) centerZ + radiusZ)
+			);
+		}
+
+		ConfiguredScan withShape(String shape) {
+			return switch (shape) {
+				case "world" -> world();
+				case "circle" -> radius(Math.max(radiusX(), radiusZ()), centerX(), centerZ());
+				case "square" -> {
+					int radius = Math.max(radiusX(), radiusZ());
+					yield square(centerX(), centerZ(), radius, radius);
+				}
+				case "rectangle" -> square(centerX(), centerZ(), radiusX(), radiusZ());
+				default -> throw new IllegalArgumentException("Unknown shape: " + shape);
+			};
+		}
+
+		ConfiguredScan withCenter(int centerX, int centerZ) {
+			return kind == ScanKind.RADIUS
+				? radius(radiusX(), centerX, centerZ)
+				: square(centerX, centerZ, radiusX(), radiusZ());
+		}
+
+		ConfiguredScan withRadius(int radiusX, int radiusZ) {
+			return kind == ScanKind.RADIUS && radiusX == radiusZ
+				? radius(radiusX, centerX(), centerZ())
+				: square(centerX(), centerZ(), radiusX, radiusZ);
+		}
+
+		String shapeName() {
+			return switch (kind) {
+				case WORLD -> "world";
+				case RADIUS -> "circle";
+				case BOX -> radiusX() == radiusZ() ? "square" : "rectangle";
+			};
+		}
+
+		private int centerX() {
+			return switch (kind) {
+				case WORLD -> 0;
+				case RADIUS -> b;
+				case BOX -> (int) (((long) a + c) / 2L);
+			};
+		}
+
+		private int centerZ() {
+			return switch (kind) {
+				case WORLD -> 0;
+				case RADIUS -> c;
+				case BOX -> (int) (((long) b + d) / 2L);
+			};
+		}
+
+		private int radiusX() {
+			return switch (kind) {
+				case WORLD -> DEFAULT_RADIUS;
+				case RADIUS -> a;
+				case BOX -> clampToInt((Math.abs((long) c - a) + 1L) / 2L);
+			};
+		}
+
+		private int radiusZ() {
+			return switch (kind) {
+				case WORLD -> DEFAULT_RADIUS;
+				case RADIUS -> a;
+				case BOX -> clampToInt((Math.abs((long) d - b) + 1L) / 2L);
+			};
+		}
+
+		private static int clampToInt(long value) {
+			return (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, value));
+		}
+
 		String describe() {
 			return switch (kind) {
 				case WORLD -> "world";
-				case RADIUS -> "radius(circle r=" + a + " blocks, x=" + b + ", z=" + c + ")";
-				case BOX -> "region(blocks " + a + ", " + b + " -> " + c + ", " + d + ")";
+				case RADIUS -> "circle(center=" + b + ", " + c + ", radius=" + a + ")";
+				case BOX -> shapeName() + "(center=" + centerX() + ", " + centerZ() + ", radius=" + radiusX() + " x " + radiusZ() + ")";
 			};
 		}
 	}
@@ -990,9 +979,6 @@ public final class LucTaskManager {
 				(boundarySkipped > 0 ? ", skipping " + boundarySkipped + " chunk(s) with missing neighbors" : "") +
 				" | " + throughputDescription;
 		}
-	}
-
-	private record TaskSelection(String dimension, ConfiguredScan scan) {
 	}
 
 	private enum ScanKind {

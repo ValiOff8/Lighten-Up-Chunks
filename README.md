@@ -1,6 +1,6 @@
 # Lighten Up, Chunks!
 
-Server-side chunk relighting for existing Fabric worlds on Minecraft `26.1.2`.
+Server-side chunk relighting for existing Fabric worlds on Minecraft `26.2`.
 
 This mod is aimed at repairing broken saved lighting in bulk without asking admins to fly around and trigger chunk updates manually.
 
@@ -15,29 +15,34 @@ This mod is aimed at repairing broken saved lighting in bulk without asking admi
 
 ## Commands
 
-- `/luc`
-  Shows the current selection and task status
-- `/luc dimensions`
-  Lists loaded dimensions and powers tab completion for custom dimensions
-- `/luc mode <missing-only|full|full-2-pass>`
-  Chooses how the next task should relight chunks
-- `/luc world [dimension]`
-  Configures a whole-dimension selection
-- `/luc radius <radius> [centerX centerZ] [dimension]`
-  Configures a circular selection in block coordinates
-- `/luc region <x1 z1 x2 z2>`
-  Configures a boxed selection in block coordinates
-- `/luc preview`
-  Scans the configured selection and shows how many chunks and relight steps would run before you start
-- `/luc estimate`
-  Alias for `/luc preview`
-- `/luc start`
-  Starts the configured task
-- `/luc pause`
-- `/luc resume`
-- `/luc cancel`
+The selection workflow now follows Chunky: select a world, shape, centre, and radius, then preview or start it. The default selection is a 500-block square centred at `0, 0` in the overworld.
 
-You can also run `preview`, `estimate`, and `start` directly with `world`, `radius`, `region`, and explicit dimension arguments.
+- `/luc` — show the current selection and task state
+- `/luc world [dimension]` — select a dimension; omitting it uses your current dimension
+- `/luc shape <square|circle|rectangle|world>` — select the scan shape
+- `/luc center [x z]` — set the centre; omitting coordinates uses your position
+- `/luc radius <radius> [radiusZ]` — set one radius, or separate X/Z radii
+- `/luc corners <x1 z1 x2 z2>` — set a rectangular selection from corner coordinates
+- `/luc mode [missing-only|full|full-2-pass]` — show or change the relight mode
+- `/luc selection` — show the current selection
+- `/luc preview` — count matched chunks without starting
+- `/luc start` — start relighting the current selection
+- `/luc progress` — show active or saved task progress
+- `/luc pause` — pause and persist the active task
+- `/luc continue` — continue a saved task
+- `/luc cancel` — cancel the active or saved task
+- `/luc config [get|set|reload|reset]` — inspect or change server settings
+
+Example:
+
+```text
+/luc world overworld
+/luc shape circle
+/luc center 0 0
+/luc radius 5000
+/luc preview
+/luc start
+```
 
 ## Relight Modes
 
@@ -76,4 +81,4 @@ Notable options:
 - `enableVoxyCompat`
 - Boss bar display toggles
 
-Set them in-game with `/luc config show`, `/luc config get <key>`, and `/luc config set <key> <value>`, or through Mod Menu in singleplayer.
+Set them in-game with `/luc config`, `/luc config get <key>`, and `/luc config set <key> <value>`, or through Mod Menu in singleplayer.

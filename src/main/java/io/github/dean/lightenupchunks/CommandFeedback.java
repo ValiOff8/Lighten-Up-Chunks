@@ -8,7 +8,7 @@ public final class CommandFeedback {
 	}
 
 	public static void sendSuccess(CommandSourceStack source, String message, boolean broadcastToOps) {
-		Component component = TextComponents.literal(message);
+		Component component = Component.literal(message);
 		source.sendSuccess(() -> component, broadcastToOps);
 	}
 }

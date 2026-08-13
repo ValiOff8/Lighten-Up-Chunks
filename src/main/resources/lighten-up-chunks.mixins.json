@@ -4,8 +4,7 @@
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
 		"accessor.ChunkAccessAccessor",
-		"accessor.ChunkMapInvoker",
-		"accessor.ServerChunkCacheAccessor"
+		"accessor.ChunkMapInvoker"
 	],
 	"client": [
 		"client.MinecraftPauseMixin"

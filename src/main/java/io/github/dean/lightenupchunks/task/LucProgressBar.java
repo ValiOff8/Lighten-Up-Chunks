@@ -2,7 +2,6 @@ package io.github.dean.lightenupchunks.task;
 
 import io.github.dean.lightenupchunks.LucConfig;
 import io.github.dean.lightenupchunks.LucConfigManager;
-import io.github.dean.lightenupchunks.TextComponents;
 import java.text.DecimalFormat;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -23,7 +22,7 @@ public final class LucProgressBar {
 	public LucProgressBar() {
 		this.bossBar = new ServerBossEvent(
 			UUID.randomUUID(),
-			TextComponents.literal("Lighten Up, Chunks!"),
+			Component.literal("Lighten Up, Chunks!"),
 			enumValue(BossEvent.BossBarColor.class, "GREEN"),
 			enumValue(BossEvent.BossBarOverlay.class, "PROGRESS")
 		);
@@ -74,13 +73,13 @@ public final class LucProgressBar {
 		}
 		bossBar.setProgress(progress);
 		String suffix = parts.isEmpty() ? "" : " -- " + String.join(" | ", parts);
-		bossBar.setName(TextComponents.literal("Lighten Up, Chunks!" + suffix));
+		bossBar.setName(Component.literal("Lighten Up, Chunks!" + suffix));
 	}
 
 	public void stop() {
 		bossBar.removeAllPlayers();
 		bossBar.setProgress(0.0F);
-		bossBar.setName(TextComponents.literal("Lighten Up, Chunks!"));
+		bossBar.setName(Component.literal("Lighten Up, Chunks!"));
 		bossBar.setVisible(false);
 	}
 

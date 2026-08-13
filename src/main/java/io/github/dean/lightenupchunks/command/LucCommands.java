@@ -13,23 +13,22 @@ import io.github.dean.lightenupchunks.CommandFeedback;
 import io.github.dean.lightenupchunks.LucConfig;
 import io.github.dean.lightenupchunks.LucConfigManager;
 import io.github.dean.lightenupchunks.LucDimensions;
-import io.github.dean.lightenupchunks.ServerLevels;
-import io.github.dean.lightenupchunks.TextComponents;
 import io.github.dean.lightenupchunks.task.LucTaskManager;
 import io.github.dean.lightenupchunks.task.RelightMode;
 import java.io.IOException;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.permissions.Permissions;
 import net.minecraft.world.phys.Vec3;
 
 public final class LucCommands {
@@ -47,21 +46,17 @@ public final class LucCommands {
 		"bossBarShowRate",
 		"bossBarShowEta"
 	};
-	private static final String[] RELIGHT_MODE_SUGGESTIONS = new String[] {
+	private static final String[] RELIGHT_MODES = new String[] {
 		RelightMode.MISSING_ONLY.serializedName(),
 		RelightMode.FULL.serializedName(),
 		RelightMode.FULL_2_PASS.serializedName()
 	};
-	private static final String[] BOOLEAN_SUGGESTIONS = new String[] {"true", "false"};
-	private static final DynamicCommandExceptionType INVALID_DIMENSION = new DynamicCommandExceptionType(value ->
-		TextComponents.literal("Invalid dimension id: " + value)
-	);
-	private static final DynamicCommandExceptionType INVALID_CONFIG_KEY = new DynamicCommandExceptionType(value ->
-		TextComponents.literal("Unknown config key: " + value)
-	);
-	private static final DynamicCommandExceptionType INVALID_RELIGHT_MODE = new DynamicCommandExceptionType(value ->
-		TextComponents.literal("Unknown relight mode: " + value)
-	);
+	private static final String[] SHAPES = new String[] {"square", "circle", "rectangle", "world"};
+	private static final String[] BOOLEANS = new String[] {"true", "false"};
+	private static final DynamicCommandExceptionType INVALID_DIMENSION = error("Invalid dimension id: ");
+	private static final DynamicCommandExceptionType INVALID_CONFIG_KEY = error("Unknown config key: ");
+	private static final DynamicCommandExceptionType INVALID_RELIGHT_MODE = error("Unknown relight mode: ");
+	private static final DynamicCommandExceptionType INVALID_SHAPE = error("Unknown shape: ");
 
 	private LucCommands() {
 	}
@@ -72,79 +67,113 @@ public final class LucCommands {
 		Commands.CommandSelection environment
 	) {
 		var root = literal("luc")
-			.requires(LucCommands::hasRequiredPermission)
-			.executes(context -> taskManager(context.getSource()).overview(context.getSource()))
-			.then(literal("status")
-				.executes(context -> taskManager(context.getSource()).status(context.getSource())))
-			.then(literal("dimensions")
-				.executes(context -> taskManager(context.getSource()).dimensions(context.getSource())))
-			.then(literal("reset")
-				.executes(context -> taskManager(context.getSource()).resetSelection(context.getSource())))
+			.requires(source -> source.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER))
+			.executes(context -> manager(context).overview(context.getSource()))
+			.then(literal("progress")
+				.executes(context -> manager(context).status(context.getSource())))
 			.then(literal("selection")
-				.executes(context -> taskManager(context.getSource()).selection(context.getSource())))
+				.executes(context -> manager(context).selection(context.getSource())))
+			.then(buildWorldCommand())
+			.then(buildShapeCommand())
+			.then(buildCenterCommand())
+			.then(buildRadiusCommand())
+			.then(literal("corners").then(cornersArguments()))
 			.then(buildRelightModeCommand())
-			.then(buildConfigCommand())
-			.then(literal("world")
-				.executes(context -> taskManager(context.getSource()).configureWorld(context.getSource(), currentDimension(context.getSource())))
-				.then(dimensionArgument("dimension")
-					.executes(context -> taskManager(context.getSource()).configureWorld(
-						context.getSource(),
-						parseDimension(context, "dimension")
-					))))
-			.then(literal("radius")
-				.then(argument("radius", IntegerArgumentType.integer(0))
-					.executes(context -> {
-						BlockCoordinate center = defaultCenter(context.getSource());
-						return taskManager(context.getSource()).configureRadius(
-							context.getSource(),
-							IntegerArgumentType.getInteger(context, "radius"),
-							center.x,
-							center.z
-						);
-					})
-					.then(argument("centerX", IntegerArgumentType.integer())
-						.then(argument("centerZ", IntegerArgumentType.integer())
-							.executes(context -> taskManager(context.getSource()).configureRadius(
-								context.getSource(),
-								IntegerArgumentType.getInteger(context, "radius"),
-								IntegerArgumentType.getInteger(context, "centerX"),
-								IntegerArgumentType.getInteger(context, "centerZ")
-							))))))
-			.then(literal("region")
-				.then(cornersArguments(context -> taskManager(context.getSource()).configureRegion(
-					context.getSource(),
-					IntegerArgumentType.getInteger(context, "x1"),
-					IntegerArgumentType.getInteger(context, "z1"),
-					IntegerArgumentType.getInteger(context, "x2"),
-					IntegerArgumentType.getInteger(context, "z2")
-				))))
-			.then(buildPreviewCommand("preview"))
-			.then(buildPreviewCommand("estimate"))
-			.then(buildStartCommand())
+			.then(literal("preview")
+				.executes(context -> manager(context).previewConfigured(context.getSource())))
+			.then(literal("start")
+				.executes(context -> manager(context).startConfigured(context.getSource())))
 			.then(literal("pause")
-				.executes(context -> taskManager(context.getSource()).pause(context.getSource())))
-			.then(literal("resume")
-				.executes(context -> taskManager(context.getSource()).resume(context.getSource())))
+				.executes(context -> manager(context).pause(context.getSource())))
+			.then(literal("continue")
+				.executes(context -> manager(context).resume(context.getSource())))
 			.then(literal("cancel")
-				.executes(context -> taskManager(context.getSource()).cancel(context.getSource())));
+				.executes(context -> manager(context).cancel(context.getSource())))
+			.then(buildConfigCommand());
 		dispatcher.register(root);
+	}
+
+	private static LiteralArgumentBuilder<CommandSourceStack> buildWorldCommand() {
+		return literal("world")
+			.executes(context -> manager(context).configureWorld(
+				context.getSource(),
+				LucDimensions.asString(context.getSource().getLevel())
+			))
+			.then(dimensionArgument("dimension")
+				.executes(context -> manager(context).configureWorld(
+					context.getSource(),
+					parseDimension(context, "dimension")
+				)));
+	}
+
+	private static LiteralArgumentBuilder<CommandSourceStack> buildShapeCommand() {
+		return literal("shape")
+			.then(argument("shape", StringArgumentType.word())
+				.suggests((context, builder) -> SharedSuggestionProvider.suggest(SHAPES, builder))
+				.executes(context -> manager(context).configureShape(
+					context.getSource(),
+					parseShape(context)
+				)));
+	}
+
+	private static LiteralArgumentBuilder<CommandSourceStack> buildCenterCommand() {
+		return literal("center")
+			.executes(context -> {
+				BlockCoordinate center = currentPosition(context.getSource());
+				return manager(context).configureCenter(context.getSource(), center.x(), center.z());
+			})
+			.then(argument("x", IntegerArgumentType.integer())
+				.then(argument("z", IntegerArgumentType.integer())
+					.executes(context -> manager(context).configureCenter(
+						context.getSource(),
+						IntegerArgumentType.getInteger(context, "x"),
+						IntegerArgumentType.getInteger(context, "z")
+					))));
+	}
+
+	private static LiteralArgumentBuilder<CommandSourceStack> buildRadiusCommand() {
+		return literal("radius")
+			.then(argument("radius", IntegerArgumentType.integer(0))
+				.executes(context -> {
+					int radius = IntegerArgumentType.getInteger(context, "radius");
+					return manager(context).configureRadius(context.getSource(), radius, radius);
+				})
+				.then(argument("radiusZ", IntegerArgumentType.integer(0))
+					.executes(context -> manager(context).configureRadius(
+						context.getSource(),
+						IntegerArgumentType.getInteger(context, "radius"),
+						IntegerArgumentType.getInteger(context, "radiusZ")
+					))));
+	}
+
+	private static RequiredArgumentBuilder<CommandSourceStack, Integer> cornersArguments() {
+		return argument("x1", IntegerArgumentType.integer())
+			.then(argument("z1", IntegerArgumentType.integer())
+				.then(argument("x2", IntegerArgumentType.integer())
+					.then(argument("z2", IntegerArgumentType.integer())
+						.executes(context -> manager(context).configureCorners(
+							context.getSource(),
+							IntegerArgumentType.getInteger(context, "x1"),
+							IntegerArgumentType.getInteger(context, "z1"),
+							IntegerArgumentType.getInteger(context, "x2"),
+							IntegerArgumentType.getInteger(context, "z2")
+						)))));
 	}
 
 	private static LiteralArgumentBuilder<CommandSourceStack> buildRelightModeCommand() {
 		return literal("mode")
-			.executes(context -> taskManager(context.getSource()).relightMode(context.getSource()))
-			.then(relightModeArgument("relightMode")
-				.executes(context -> taskManager(context.getSource()).configureRelightMode(
+			.executes(context -> manager(context).relightMode(context.getSource()))
+			.then(argument("mode", StringArgumentType.word())
+				.suggests((context, builder) -> SharedSuggestionProvider.suggest(RELIGHT_MODES, builder))
+				.executes(context -> manager(context).configureRelightMode(
 					context.getSource(),
-					parseRelightMode(context, "relightMode")
+					parseRelightMode(context, "mode")
 				)));
 	}
 
 	private static LiteralArgumentBuilder<CommandSourceStack> buildConfigCommand() {
 		return literal("config")
 			.executes(context -> showConfig(context.getSource()))
-			.then(literal("show")
-				.executes(context -> showConfig(context.getSource())))
 			.then(literal("reload")
 				.executes(context -> reloadConfig(context.getSource())))
 			.then(literal("reset")
@@ -166,256 +195,6 @@ public final class LucCommands {
 						)))));
 	}
 
-	private static LiteralArgumentBuilder<CommandSourceStack> buildStartCommand() {
-		return literal("start")
-			.executes(context -> taskManager(context.getSource()).startConfigured(context.getSource()))
-			.then(buildCurrentWorldStartCommand())
-			.then(buildCurrentRadiusStartCommand())
-			.then(literal("region").then(startRegionArguments()))
-			.then(buildExplicitDimensionStartCommand());
-	}
-
-	private static LiteralArgumentBuilder<CommandSourceStack> buildPreviewCommand(String name) {
-		return literal(name)
-			.executes(context -> taskManager(context.getSource()).previewConfigured(context.getSource()))
-			.then(buildCurrentWorldPreviewCommand())
-			.then(buildCurrentRadiusPreviewCommand())
-			.then(literal("region").then(previewRegionArguments()))
-			.then(buildExplicitDimensionPreviewCommand());
-	}
-
-	private static LiteralArgumentBuilder<CommandSourceStack> buildCurrentWorldStartCommand() {
-		return literal("world")
-			.executes(context -> taskManager(context.getSource()).startWorld(
-				context.getSource(),
-				currentDimension(context.getSource())
-			))
-			.then(dimensionArgument("dimension")
-				.executes(context -> taskManager(context.getSource()).startWorld(
-					context.getSource(),
-					parseDimension(context, "dimension")
-				)));
-	}
-
-	private static LiteralArgumentBuilder<CommandSourceStack> buildCurrentWorldPreviewCommand() {
-		return literal("world")
-			.executes(context -> taskManager(context.getSource()).previewWorld(
-				context.getSource(),
-				currentDimension(context.getSource())
-			))
-			.then(dimensionArgument("dimension")
-				.executes(context -> taskManager(context.getSource()).previewWorld(
-					context.getSource(),
-					parseDimension(context, "dimension")
-				)));
-	}
-
-	private static LiteralArgumentBuilder<CommandSourceStack> buildCurrentRadiusStartCommand() {
-		return literal("radius")
-				.then(argument("radius", IntegerArgumentType.integer(0))
-					.executes(context -> {
-						BlockCoordinate center = defaultCenter(context.getSource());
-						return taskManager(context.getSource()).startRadius(
-							context.getSource(),
-							currentDimension(context.getSource()),
-						IntegerArgumentType.getInteger(context, "radius"),
-						center.x,
-						center.z
-					);
-				})
-				.then(argument("centerX", IntegerArgumentType.integer())
-					.then(argument("centerZ", IntegerArgumentType.integer())
-						.executes(context -> taskManager(context.getSource()).startRadius(
-							context.getSource(),
-							currentDimension(context.getSource()),
-							IntegerArgumentType.getInteger(context, "radius"),
-							IntegerArgumentType.getInteger(context, "centerX"),
-							IntegerArgumentType.getInteger(context, "centerZ")
-						))
-						.then(dimensionArgument("dimension")
-							.executes(context -> taskManager(context.getSource()).startRadius(
-								context.getSource(),
-								parseDimension(context, "dimension"),
-								IntegerArgumentType.getInteger(context, "radius"),
-								IntegerArgumentType.getInteger(context, "centerX"),
-								IntegerArgumentType.getInteger(context, "centerZ")
-							))))));
-	}
-
-	private static LiteralArgumentBuilder<CommandSourceStack> buildCurrentRadiusPreviewCommand() {
-		return literal("radius")
-			.then(argument("radius", IntegerArgumentType.integer(0))
-				.executes(context -> {
-					BlockCoordinate center = defaultCenter(context.getSource());
-					return taskManager(context.getSource()).previewRadius(
-						context.getSource(),
-						currentDimension(context.getSource()),
-						IntegerArgumentType.getInteger(context, "radius"),
-						center.x,
-						center.z
-					);
-				})
-				.then(argument("centerX", IntegerArgumentType.integer())
-					.then(argument("centerZ", IntegerArgumentType.integer())
-						.executes(context -> taskManager(context.getSource()).previewRadius(
-							context.getSource(),
-							currentDimension(context.getSource()),
-							IntegerArgumentType.getInteger(context, "radius"),
-							IntegerArgumentType.getInteger(context, "centerX"),
-							IntegerArgumentType.getInteger(context, "centerZ")
-						))
-						.then(dimensionArgument("dimension")
-							.executes(context -> taskManager(context.getSource()).previewRadius(
-								context.getSource(),
-								parseDimension(context, "dimension"),
-								IntegerArgumentType.getInteger(context, "radius"),
-								IntegerArgumentType.getInteger(context, "centerX"),
-								IntegerArgumentType.getInteger(context, "centerZ")
-							))))));
-	}
-
-	private static RequiredArgumentBuilder<CommandSourceStack, String> buildExplicitDimensionStartCommand() {
-		RequiredArgumentBuilder<CommandSourceStack, String> builder = dimensionArgument("dimension")
-			.executes(context -> taskManager(context.getSource()).startWorld(
-				context.getSource(),
-				parseDimension(context, "dimension")
-			));
-		builder.then(literal("world")
-			.executes(context -> taskManager(context.getSource()).startWorld(
-				context.getSource(),
-				parseDimension(context, "dimension")
-			)));
-		builder.then(buildExplicitDimensionRadiusCommand());
-		builder.then(buildExplicitDimensionRegionCommand("region"));
-		return builder;
-	}
-
-	private static RequiredArgumentBuilder<CommandSourceStack, String> buildExplicitDimensionPreviewCommand() {
-		RequiredArgumentBuilder<CommandSourceStack, String> builder = dimensionArgument("dimension")
-			.executes(context -> taskManager(context.getSource()).previewWorld(
-				context.getSource(),
-				parseDimension(context, "dimension")
-			));
-		builder.then(literal("world")
-			.executes(context -> taskManager(context.getSource()).previewWorld(
-				context.getSource(),
-				parseDimension(context, "dimension")
-			)));
-		builder.then(buildExplicitDimensionPreviewRadiusCommand());
-		builder.then(buildExplicitDimensionPreviewRegionCommand("region"));
-		return builder;
-	}
-
-	private static LiteralArgumentBuilder<CommandSourceStack> buildExplicitDimensionRadiusCommand() {
-		return literal("radius")
-			.then(argument("radius", IntegerArgumentType.integer(0))
-				.executes(context -> {
-					BlockCoordinate center = defaultCenter(context.getSource());
-					return taskManager(context.getSource()).startRadius(
-						context.getSource(),
-						parseDimension(context, "dimension"),
-						IntegerArgumentType.getInteger(context, "radius"),
-						center.x,
-						center.z
-					);
-				})
-				.then(argument("centerX", IntegerArgumentType.integer())
-					.then(argument("centerZ", IntegerArgumentType.integer())
-						.executes(context -> taskManager(context.getSource()).startRadius(
-							context.getSource(),
-							parseDimension(context, "dimension"),
-							IntegerArgumentType.getInteger(context, "radius"),
-							IntegerArgumentType.getInteger(context, "centerX"),
-							IntegerArgumentType.getInteger(context, "centerZ")
-						)))));
-	}
-
-	private static LiteralArgumentBuilder<CommandSourceStack> buildExplicitDimensionPreviewRadiusCommand() {
-		return literal("radius")
-			.then(argument("radius", IntegerArgumentType.integer(0))
-				.executes(context -> {
-					BlockCoordinate center = defaultCenter(context.getSource());
-					return taskManager(context.getSource()).previewRadius(
-						context.getSource(),
-						parseDimension(context, "dimension"),
-						IntegerArgumentType.getInteger(context, "radius"),
-						center.x,
-						center.z
-					);
-				})
-				.then(argument("centerX", IntegerArgumentType.integer())
-					.then(argument("centerZ", IntegerArgumentType.integer())
-						.executes(context -> taskManager(context.getSource()).previewRadius(
-							context.getSource(),
-							parseDimension(context, "dimension"),
-							IntegerArgumentType.getInteger(context, "radius"),
-							IntegerArgumentType.getInteger(context, "centerX"),
-							IntegerArgumentType.getInteger(context, "centerZ")
-						)))));
-	}
-
-	private static LiteralArgumentBuilder<CommandSourceStack> buildExplicitDimensionRegionCommand(String name) {
-		return literal(name)
-			.then(cornersArguments(context -> taskManager(context.getSource()).startRegion(
-				context.getSource(),
-				parseDimension(context, "dimension"),
-				IntegerArgumentType.getInteger(context, "x1"),
-				IntegerArgumentType.getInteger(context, "z1"),
-				IntegerArgumentType.getInteger(context, "x2"),
-				IntegerArgumentType.getInteger(context, "z2")
-			)));
-	}
-
-	private static LiteralArgumentBuilder<CommandSourceStack> buildExplicitDimensionPreviewRegionCommand(String name) {
-		return literal(name)
-			.then(cornersArguments(context -> taskManager(context.getSource()).previewRegion(
-				context.getSource(),
-				parseDimension(context, "dimension"),
-				IntegerArgumentType.getInteger(context, "x1"),
-				IntegerArgumentType.getInteger(context, "z1"),
-				IntegerArgumentType.getInteger(context, "x2"),
-				IntegerArgumentType.getInteger(context, "z2")
-			)));
-	}
-
-	private static RequiredArgumentBuilder<CommandSourceStack, Integer> startRegionArguments() {
-		return cornersArguments(context -> taskManager(context.getSource()).startRegion(
-			context.getSource(),
-			currentDimension(context.getSource()),
-			IntegerArgumentType.getInteger(context, "x1"),
-			IntegerArgumentType.getInteger(context, "z1"),
-			IntegerArgumentType.getInteger(context, "x2"),
-			IntegerArgumentType.getInteger(context, "z2")
-		));
-	}
-
-	private static RequiredArgumentBuilder<CommandSourceStack, Integer> previewRegionArguments() {
-		return cornersArguments(context -> taskManager(context.getSource()).previewRegion(
-			context.getSource(),
-			currentDimension(context.getSource()),
-			IntegerArgumentType.getInteger(context, "x1"),
-			IntegerArgumentType.getInteger(context, "z1"),
-			IntegerArgumentType.getInteger(context, "x2"),
-			IntegerArgumentType.getInteger(context, "z2")
-		));
-	}
-
-	private static RequiredArgumentBuilder<CommandSourceStack, Integer> cornersArguments(CommandExecutor executor) {
-		return argument("x1", IntegerArgumentType.integer())
-			.then(argument("z1", IntegerArgumentType.integer())
-				.then(argument("x2", IntegerArgumentType.integer())
-					.then(argument("z2", IntegerArgumentType.integer())
-						.executes(executor::run))));
-	}
-
-	private static LiteralArgumentBuilder<CommandSourceStack> literal(String name) {
-		return LiteralArgumentBuilder.literal(name);
-	}
-
-	private static <T> RequiredArgumentBuilder<CommandSourceStack, T> argument(String name, ArgumentType<T> type) {
-		return RequiredArgumentBuilder.argument(name, type);
-	}
-
 	private static RequiredArgumentBuilder<CommandSourceStack, String> dimensionArgument(String name) {
 		return argument(name, StringArgumentType.word())
 			.suggests((context, builder) -> SharedSuggestionProvider.suggest(dimensionSuggestions(context.getSource()), builder));
@@ -426,34 +205,47 @@ public final class LucCommands {
 			.suggests((context, builder) -> SharedSuggestionProvider.suggest(CONFIG_KEYS, builder));
 	}
 
-	private static RequiredArgumentBuilder<CommandSourceStack, String> relightModeArgument(String name) {
-		return argument(name, StringArgumentType.word())
-			.suggests((context, builder) -> SharedSuggestionProvider.suggest(RELIGHT_MODE_SUGGESTIONS, builder));
+	private static LiteralArgumentBuilder<CommandSourceStack> literal(String name) {
+		return LiteralArgumentBuilder.literal(name);
 	}
 
-	private static String parseDimension(CommandContext<CommandSourceStack> context, String argumentName) throws CommandSyntaxException {
-		String raw = StringArgumentType.getString(context, argumentName);
-		try {
-			return LucDimensions.normalize(raw);
-		} catch (RuntimeException exception) {
-			throw INVALID_DIMENSION.create(raw);
-		}
+	private static <T> RequiredArgumentBuilder<CommandSourceStack, T> argument(String name, ArgumentType<T> type) {
+		return RequiredArgumentBuilder.argument(name, type);
 	}
 
-	private static RelightMode parseRelightMode(CommandContext<CommandSourceStack> context, String argumentName) throws CommandSyntaxException {
-		String raw = StringArgumentType.getString(context, argumentName);
+	private static LucTaskManager manager(CommandContext<CommandSourceStack> context) {
+		return LucTaskManager.get(context.getSource().getServer());
+	}
+
+	private static String parseDimension(CommandContext<CommandSourceStack> context, String name) throws CommandSyntaxException {
+		String value = StringArgumentType.getString(context, name);
 		try {
-			return RelightMode.fromSerializedName(raw);
+			return LucDimensions.normalize(value);
 		} catch (IllegalArgumentException exception) {
-			throw INVALID_RELIGHT_MODE.create(raw);
+			throw INVALID_DIMENSION.create(value);
 		}
 	}
 
-	private static String currentDimension(CommandSourceStack source) {
-		return LucDimensions.asString(source.getLevel());
+	private static RelightMode parseRelightMode(CommandContext<CommandSourceStack> context, String name) throws CommandSyntaxException {
+		String value = StringArgumentType.getString(context, name);
+		try {
+			return RelightMode.fromSerializedName(value);
+		} catch (IllegalArgumentException exception) {
+			throw INVALID_RELIGHT_MODE.create(value);
+		}
 	}
 
-	private static BlockCoordinate defaultCenter(CommandSourceStack source) {
+	private static String parseShape(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+		String value = StringArgumentType.getString(context, "shape").toLowerCase(Locale.ROOT);
+		for (String shape : SHAPES) {
+			if (shape.equals(value)) {
+				return value;
+			}
+		}
+		throw INVALID_SHAPE.create(value);
+	}
+
+	private static BlockCoordinate currentPosition(CommandSourceStack source) {
 		Vec3 position = source.getPosition();
 		return new BlockCoordinate((int) Math.floor(position.x), (int) Math.floor(position.z));
 	}
@@ -490,7 +282,7 @@ public final class LucCommands {
 		try {
 			LucConfigManager.reset();
 		} catch (IOException exception) {
-			throw configError("Failed to reset config: " + exception.getMessage());
+			throw commandError("Failed to reset config: " + exception.getMessage());
 		}
 		CommandFeedback.sendSuccess(source, "Reset config to defaults at " + LucConfigManager.path() + ".", true);
 		return 1;
@@ -504,9 +296,9 @@ public final class LucCommands {
 		try {
 			updated = LucConfigManager.update(config -> applyConfigValue(config, key, value));
 		} catch (IOException exception) {
-			throw configError("Failed to save config: " + exception.getMessage());
+			throw commandError("Failed to save config: " + exception.getMessage());
 		} catch (IllegalArgumentException exception) {
-			throw configError("Invalid value for " + key + ": " + exception.getMessage());
+			throw commandError("Invalid value for " + key + ": " + exception.getMessage());
 		}
 		CommandFeedback.sendSuccess(source, "Set " + key + "=" + configValue(updated, key) + " in " + LucConfigManager.path() + ".", true);
 		return 1;
@@ -520,20 +312,20 @@ public final class LucCommands {
 		return 1;
 	}
 
-	private static void applyConfigValue(LucConfig config, String key, String rawValue) {
+	private static void applyConfigValue(LucConfig config, String key, String value) {
 		switch (key) {
-			case "keepRunningWhilePaused" -> config.keepRunningWhilePaused = parseBoolean(rawValue);
-			case "defaultRelightMode" -> config.defaultRelightMode = RelightMode.fromSerializedName(rawValue).serializedName();
-			case "maxInFlightChunks" -> config.maxInFlightChunks = parseNonNegativeInt(rawValue, key);
-			case "maxRelightsPerTick" -> config.maxRelightsPerTick = parseNonNegativeInt(rawValue, key);
-			case "saveFlushIntervalSeconds" -> config.saveFlushIntervalSeconds = parsePositiveInt(rawValue, key);
-			case "enableVoxyCompat" -> config.enableVoxyCompat = parseBoolean(rawValue);
-			case "bossBarShowPercentage" -> config.bossBarShowPercentage = parseBoolean(rawValue);
-			case "bossBarShowCounts" -> config.bossBarShowCounts = parseBoolean(rawValue);
-			case "bossBarShowRemaining" -> config.bossBarShowRemaining = parseBoolean(rawValue);
-			case "bossBarShowCurrentChunk" -> config.bossBarShowCurrentChunk = parseBoolean(rawValue);
-			case "bossBarShowRate" -> config.bossBarShowRate = parseBoolean(rawValue);
-			case "bossBarShowEta" -> config.bossBarShowEta = parseBoolean(rawValue);
+			case "keepRunningWhilePaused" -> config.keepRunningWhilePaused = parseBoolean(value);
+			case "defaultRelightMode" -> config.defaultRelightMode = RelightMode.fromSerializedName(value).serializedName();
+			case "maxInFlightChunks" -> config.maxInFlightChunks = parseNonNegativeInt(value, key);
+			case "maxRelightsPerTick" -> config.maxRelightsPerTick = parseNonNegativeInt(value, key);
+			case "saveFlushIntervalSeconds" -> config.saveFlushIntervalSeconds = parsePositiveInt(value, key);
+			case "enableVoxyCompat" -> config.enableVoxyCompat = parseBoolean(value);
+			case "bossBarShowPercentage" -> config.bossBarShowPercentage = parseBoolean(value);
+			case "bossBarShowCounts" -> config.bossBarShowCounts = parseBoolean(value);
+			case "bossBarShowRemaining" -> config.bossBarShowRemaining = parseBoolean(value);
+			case "bossBarShowCurrentChunk" -> config.bossBarShowCurrentChunk = parseBoolean(value);
+			case "bossBarShowRate" -> config.bossBarShowRate = parseBoolean(value);
+			case "bossBarShowEta" -> config.bossBarShowEta = parseBoolean(value);
 			default -> throw new IllegalArgumentException(key);
 		}
 	}
@@ -556,17 +348,9 @@ public final class LucCommands {
 		};
 	}
 
-	private static LucTaskManager taskManager(CommandSourceStack source) {
-		MinecraftServer server = source.getServer();
-		return LucTaskManager.get(server);
-	}
-
 	private static List<String> dimensionSuggestions(CommandSourceStack source) {
-		Set<String> suggestions = new LinkedHashSet<>();
-		suggestions.add("overworld");
-		suggestions.add("nether");
-		suggestions.add("end");
-		for (ServerLevel level : ServerLevels.all(source.getServer())) {
+		Set<String> suggestions = new LinkedHashSet<>(List.of("overworld", "nether", "end"));
+		for (ServerLevel level : source.getServer().getAllLevels()) {
 			String dimension = LucDimensions.asString(level);
 			if (!dimension.equals(LucDimensions.OVERWORLD) && !dimension.equals(LucDimensions.NETHER) && !dimension.equals(LucDimensions.END)) {
 				suggestions.add(dimension);
@@ -575,13 +359,13 @@ public final class LucCommands {
 		return new ArrayList<>(suggestions);
 	}
 
-	private static java.util.concurrent.CompletableFuture<com.mojang.brigadier.suggestion.Suggestions> suggestConfigValues(
+	private static CompletableFuture<com.mojang.brigadier.suggestion.Suggestions> suggestConfigValues(
 		CommandContext<CommandSourceStack> context,
 		com.mojang.brigadier.suggestion.SuggestionsBuilder builder
 	) {
 		String key = StringArgumentType.getString(context, "key");
 		if (key.equals("defaultRelightMode")) {
-			return SharedSuggestionProvider.suggest(RELIGHT_MODE_SUGGESTIONS, builder);
+			return SharedSuggestionProvider.suggest(RELIGHT_MODES, builder);
 		}
 		if (key.equals("maxInFlightChunks") || key.equals("maxRelightsPerTick")) {
 			return SharedSuggestionProvider.suggest(new String[] {"0", "16", "32", "48", "80", "128", "256"}, builder);
@@ -589,10 +373,7 @@ public final class LucCommands {
 		if (key.equals("saveFlushIntervalSeconds")) {
 			return SharedSuggestionProvider.suggest(new String[] {"10", "30", "60", "120"}, builder);
 		}
-		if (key.equals("enableVoxyCompat")) {
-			return SharedSuggestionProvider.suggest(BOOLEAN_SUGGESTIONS, builder);
-		}
-		return SharedSuggestionProvider.suggest(BOOLEAN_SUGGESTIONS, builder);
+		return SharedSuggestionProvider.suggest(BOOLEANS, builder);
 	}
 
 	private static boolean parseBoolean(String value) {
@@ -630,67 +411,15 @@ public final class LucCommands {
 	}
 
 	private static boolean isKnownConfigKey(String key) {
-		for (String configKey : CONFIG_KEYS) {
-			if (configKey.equals(key)) {
-				return true;
-			}
-		}
-		return false;
+		return List.of(CONFIG_KEYS).contains(key);
 	}
 
-	private static boolean hasRequiredPermission(CommandSourceStack source) {
-		Boolean direct = tryBooleanMethod(source, "hasPermission", 2);
-		if (direct != null) {
-			return direct;
-		}
-
-		Boolean legacy = tryBooleanMethod(source, "hasPermissionLevel", 2);
-		if (legacy != null) {
-			return legacy;
-		}
-
-		Object permissions = tryZeroArgMethod(source, "permissions");
-		if (permissions != null) {
-			Boolean permissionObjectResult = tryBooleanMethod(permissions, "hasPermission", 2);
-			if (permissionObjectResult != null) {
-				return permissionObjectResult;
-			}
-		}
-
-		return true;
+	private static DynamicCommandExceptionType error(String prefix) {
+		return new DynamicCommandExceptionType(value -> Component.literal(prefix + value));
 	}
 
-	private static Object tryZeroArgMethod(Object target, String name) {
-		try {
-			Method method = target.getClass().getMethod(name);
-			method.setAccessible(true);
-			return method.invoke(target);
-		} catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException ignored) {
-			return null;
-		}
-	}
-
-	private static Boolean tryBooleanMethod(Object target, String name, int value) {
-		try {
-			Method method = target.getClass().getMethod(name, int.class);
-			if (method.getReturnType() != boolean.class && method.getReturnType() != Boolean.class) {
-				return null;
-			}
-			method.setAccessible(true);
-			Object result = method.invoke(target, value);
-			return result instanceof Boolean bool ? bool : null;
-		} catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException ignored) {
-			return null;
-		}
-	}
-
-	private static CommandSyntaxException configError(String message) {
-		return new DynamicCommandExceptionType(value -> TextComponents.literal(String.valueOf(value))).create(message);
-	}
-
-	@FunctionalInterface
-	private interface CommandExecutor {
-		int run(CommandContext<CommandSourceStack> context) throws CommandSyntaxException;
+	private static CommandSyntaxException commandError(String message) {
+		return new DynamicCommandExceptionType(value -> Component.literal(String.valueOf(value))).create(message);
 	}
 
 	private record BlockCoordinate(int x, int z) {

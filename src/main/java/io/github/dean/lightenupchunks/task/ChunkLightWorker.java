@@ -6,7 +6,6 @@ import io.github.dean.lightenupchunks.LightenUpChunks;
 import io.github.dean.lightenupchunks.VoxyCompat;
 import io.github.dean.lightenupchunks.mixin.accessor.ChunkAccessAccessor;
 import io.github.dean.lightenupchunks.mixin.accessor.ChunkMapInvoker;
-import io.github.dean.lightenupchunks.mixin.accessor.ServerChunkCacheAccessor;
 import io.github.dean.lightenupchunks.scanner.RegionFileProbe;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -65,7 +64,7 @@ public final class ChunkLightWorker {
 			}
 
 			List<ChunkPos> retainedChunks = ticketArea(chunkPos);
-			if (!allChunksExist(level, ticketArea(chunkPos))) {
+			if (!allChunksExist(level, retainedChunks)) {
 				skipped++;
 				continue;
 			}
@@ -205,7 +204,7 @@ public final class ChunkLightWorker {
 
 	private void saveRelitArea(ServerLevel level, List<ChunkPos> retainedChunks) {
 		ServerChunkCache chunkSource = level.getChunkSource();
-		ChunkMapInvoker chunkMap = (ChunkMapInvoker) ((ServerChunkCacheAccessor) chunkSource).lightenupchunks$getChunkMap();
+		ChunkMapInvoker chunkMap = (ChunkMapInvoker) chunkSource.chunkMap;
 		for (ChunkPos retainedChunkPos : retainedChunks) {
 			if (!shouldSaveChunk(level, retainedChunkPos)) {
 				continue;
@@ -214,16 +213,17 @@ public final class ChunkLightWorker {
 			if (retainedChunk != null) {
 				retainedChunk.markUnsaved();
 				chunkMap.lightenupchunks$saveChunk(retainedChunk);
-				broadcastRelitChunk(chunkMap, retainedChunk);
+				broadcastRelitChunk(level, retainedChunk);
 				VoxyCompat.notifyChunkRelit(level, retainedChunk);
 			}
 		}
 	}
 
-	private void broadcastRelitChunk(ChunkMapInvoker chunkMap, LevelChunk chunk) {
-		List<ServerPlayer> players = chunkMap.lightenupchunks$getPlayers(chunk.getPos(), false);
-		for (ServerPlayer player : players) {
-			chunkMap.lightenupchunks$markChunkPendingToSend(player, chunk);
+	private void broadcastRelitChunk(ServerLevel level, LevelChunk chunk) {
+		for (ServerPlayer player : level.players()) {
+			if (player.getChunkTrackingView().contains(chunk.getPos())) {
+				player.connection.chunkSender.markChunkPendingToSend(chunk);
+			}
 		}
 	}
 

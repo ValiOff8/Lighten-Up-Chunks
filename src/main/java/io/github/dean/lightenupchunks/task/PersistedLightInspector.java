@@ -38,7 +38,7 @@ final class PersistedLightInspector implements AutoCloseable {
 				return true;
 			}
 
-			CompoundTag chunkTag = NbtIo.read(inputStream, NbtAccounter.unlimitedHeap());
+			CompoundTag chunkTag = NbtIo.read(inputStream, NbtAccounter.uncompressedQuota());
 			return lacksStoredLightData(chunkTag, currentHasSkyLight);
 		}
 	}

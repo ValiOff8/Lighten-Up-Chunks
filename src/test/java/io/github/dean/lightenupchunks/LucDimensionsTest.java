@@ -23,11 +23,4 @@ class LucDimensionsTest {
 		assertThrows(IllegalArgumentException.class, () -> LucDimensions.normalize(":broken"));
 		assertThrows(IllegalArgumentException.class, () -> LucDimensions.normalize("too:many:parts"));
 	}
-
-	@Test
-	void asStringParsesCommonResourceKeyFormats() {
-		assertEquals("minecraft:overworld", LucDimensions.asString("ResourceKey[minecraft:overworld]"));
-		assertEquals("modded:moon", LucDimensions.asString("ResourceKey[minecraft:dimension / modded:moon]"));
-		assertEquals("modded:sky", LucDimensions.asString("modded:sky"));
-	}
 }

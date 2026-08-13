@@ -21,12 +21,9 @@ public class LightenUpChunks implements ModInitializer {
 		ServerLifecycleEvents.SERVER_STARTED.register(LucTaskManager::onServerStarted);
 		ServerLifecycleEvents.SERVER_STOPPING.register(LucTaskManager::onServerStopping);
 		ServerTickEvents.END_SERVER_TICK.register(LucTaskManager::onEndServerTick);
-		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
-			var player = PlayerLookup.resolve(handler);
-			if (player != null) {
-				LucTaskManager.get(server).onPlayerJoin(player);
-			}
-		});
+		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) ->
+			LucTaskManager.get(server).onPlayerJoin(handler.player)
+		);
 		LOGGER.info("Lighten Up, Chunks initialised");
 	}
 }
