@@ -15,6 +15,8 @@ This mod is aimed at repairing broken saved lighting in bulk without asking admi
 Build and run the tests with `./gradlew build` (`.\gradlew.bat build` on Windows).
 The mod JAR is written to `build/libs/lighten-up-chunks-1.3.0.jar`.
 
+Download the built mod for Minecraft `26.3` from [releases/lighten-up-chunks-1.3.0.jar](releases/lighten-up-chunks-1.3.0.jar).
+
 ## What It Does
 
 - Scans existing chunks from region files instead of generating new terrain
