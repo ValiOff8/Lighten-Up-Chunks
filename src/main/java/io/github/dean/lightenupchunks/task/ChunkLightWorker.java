@@ -62,6 +62,11 @@ public final class ChunkLightWorker {
 			if (chunkPos == null) {
 				return skipped;
 			}
+			if (inFlightChunks.containsKey(chunkPos)) {
+				// A later pass must wait until the earlier pass releases this chunk.
+				task.returnChunks(List.of(chunkPos));
+				return skipped;
+			}
 
 			List<ChunkPos> retainedChunks = ticketArea(chunkPos);
 			if (!allChunksExist(level, retainedChunks)) {
